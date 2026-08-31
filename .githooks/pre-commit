@@ -1,0 +1,77 @@
+#!/bin/sh
+# =============================================================
+# 十一记账 pre-commit hook
+# 作用：提交前自动调用 Claude 让 code-reviewer 审查暂存改动，
+#       通过（拿到通行证）后才允许提交，否则拦截提交。
+# 说明：如果工具异常会自动放行（fail-open），避免把提交卡死。
+# 强制跳过审查：git commit --no-verify
+# =============================================================
+
+# 1. 没有暂存改动就直接放行
+if [ -z "$(git diff --cached --name-only)" ]; then
+  echo "[pre-commit] 没有暂存的文件，跳过审查。"
+  exit 0
+fi
+
+# 2. claude 命令不可用时放行并提示
+if ! command -v claude >/dev/null 2>&1; then
+  echo "[pre-commit] ⚠️ 未找到 claude 命令，无法自动审查，本次放行。"
+  exit 0
+fi
+
+# 3. 组织审查提示词
+PROMPT=$(cat <<'EOF'
+你是「十一记账」项目的提交审查关卡（pre-commit gate）。
+
+任务：审查本仓库暂存区（staged）的改动，并给出明确的通过/不通过结论。
+
+步骤：
+1. 执行命令 git diff --cached 查看本次暂存的改动内容。
+2. 使用项目里名为 code-reviewer 的 subagent 对这些改动做质量检查。
+3. 汇总审查结论。
+
+输出格式（必须严格遵守）：
+- 若改动可以接受（没有必须修复的问题），第一行输出：REVIEW_RESULT: PASS
+- 若存在必须修复的问题，第一行输出：REVIEW_RESULT: FAIL，第二行起列出问题清单（每条包含：文件、位置、问题说明、改进建议）。
+
+输出要求（严格）：
+- 输出的第一行必须且只能是：REVIEW_RESULT: PASS 或 REVIEW_RESULT: FAIL
+- 第一行之后才是正文（问题清单等）。
+- 正文用中文，简明扼要。
+EOF
+)
+
+# 4. 调用 claude 进行审查（约 1-2 分钟）
+echo "[pre-commit] 🔍 正在让 code-reviewer 审查暂存改动（约 1-2 分钟）..."
+OUTPUT=$(env -u ELECTRON_RUN_AS_NODE claude -p --dangerously-skip-permissions --model sonnet "$PROMPT" 2>&1)
+CLAUDE_CODE=$?
+
+# 5. claude 异常退出（网络/API 出错等）→ 按 fail-open 放行，避免把提交卡死
+if [ "$CLAUDE_CODE" -ne 0 ]; then
+  echo "[pre-commit] ⚠️ claude 异常退出（状态码 $CLAUDE_CODE），本次放行。"
+  echo "如需复核，可让 Claude 用 code-reviewer 检查代码质量。"
+  exit 0
+fi
+
+# 6. 解析审查结果（在整个输出中找 REVIEW_RESULT: PASS/FAIL 标记，不区分大小写）
+RESULT=$(printf '%s\n' "$OUTPUT" | grep -io 'REVIEW_RESULT:[[:space:]]*[A-Z]*' | head -1 | awk '{print $NF}' | tr '[:lower:]' '[:upper:]')
+
+if [ "$RESULT" = "PASS" ]; then
+  echo "[pre-commit] ✅ 审查通过，通行证已发放，允许提交。"
+  exit 0
+fi
+
+if [ "$RESULT" = "FAIL" ]; then
+  echo "[pre-commit] ❌ 审查未通过，提交被拦截（未获得通行证）。"
+  echo ""
+  echo "=== code-reviewer 审查结果 ==="
+  printf '%s\n' "$OUTPUT"
+  echo "================================"
+  echo "若确认要强制提交（跳过审查），请用：git commit --no-verify"
+  exit 1
+fi
+
+# 7. 未返回明确结果 → 放行并提示
+echo "[pre-commit] ⚠️ 审查未返回明确结果，本次放行。"
+echo "如需复核，可让 Claude 用 code-reviewer 检查代码质量。"
+exit 0
