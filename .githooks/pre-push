@@ -1,0 +1,27 @@
+#!/bin/sh
+# =============================================================
+# 十一记账 pre-push hook
+# 作用：推送到远程仓库前，自动运行类型检查（npm run typecheck），
+#       检查不通过则拦截推送，避免把有错误的代码推上去。
+# 强制跳过检查：git push --no-verify
+# =============================================================
+
+# 1. npm 不可用时放行并提示
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[pre-push] ⚠️ 未找到 npm 命令，无法进行类型检查，本次放行。"
+  exit 0
+fi
+
+# 2. 运行类型检查
+echo "[pre-push] 🔍 推送前类型检查中（npm run typecheck）..."
+npm run typecheck 2>&1
+STATUS=$?
+
+if [ "$STATUS" -eq 0 ]; then
+  echo "[pre-push] ✅ 类型检查通过，允许推送。"
+  exit 0
+fi
+
+echo "[pre-push] ❌ 类型检查未通过（状态码 $STATUS），推送被拦截。"
+echo "请先修复上面的错误；确认要强制推送请用：git push --no-verify"
+exit 1

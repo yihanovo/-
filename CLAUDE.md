@@ -140,3 +140,10 @@
 - 暂未设置应用图标（用的是 Electron 默认图标），后续可补充
 - 在境内打包时，如遇到下载慢/失败，可加镜像环境变量：
   `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`
+
+### git 提交审查 hook（重要）
+- 项目配置了 pre-commit hook（`.githooks/pre-commit`），**每次 `git commit` 会自动调用 claude 让 code-reviewer 审查暂存改动**。
+- 审查通过（输出 `REVIEW_RESULT: PASS`）才允许提交；有问题（`REVIEW_RESULT: FAIL`）会拦截提交并列出问题清单。
+- 如需跳过审查：`git commit --no-verify`（谨慎使用）。
+- 另配置了 pre-push hook（`.githooks/pre-push`），**推送前自动运行 `npm run typecheck`**，检查不通过则拦截推送；跳过用 `git push --no-verify`。
+- hook 通过 `git config core.hooksPath .githooks` 启用（该配置不随仓库传递，重新克隆后需重新执行此命令）。
